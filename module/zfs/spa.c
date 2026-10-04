@@ -3027,6 +3027,16 @@ spa_load_verify_done(zio_t *zio)
 			meta = BP_GET_LEVEL(bp) != 0 ||
 			    DMU_OT_IS_METADATA(type);
 		}
+		zfs_dbgmsg("spa_load_verify: error %d on <%llu, %llu, %lld, "
+		    "%llu> type %u level %u birth %llu, counted as %s "
+		    "(relaxmeta=%d)", error,
+		    (u_longlong_t)zio->io_bookmark.zb_objset,
+		    (u_longlong_t)zio->io_bookmark.zb_object,
+		    (longlong_t)zio->io_bookmark.zb_level,
+		    (u_longlong_t)zio->io_bookmark.zb_blkid,
+		    (uint_t)type, (uint_t)BP_GET_LEVEL(bp),
+		    (u_longlong_t)BP_GET_LOGICAL_BIRTH(bp),
+		    meta ? "metadata" : "data", (int)sle->sle_relaxmeta);
 		if (meta)
 			atomic_inc_64(&sle->sle_meta_count);
 		else
@@ -3079,6 +3089,11 @@ spa_load_verify_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 	 * trust the BP_GET_TYPE and BP_GET_LEVEL values.
 	 */
 	if (zfs_blkptr_verify(spa, bp, BLK_CONFIG_NEEDED, BLK_VERIFY_LOG)) {
+		zfs_dbgmsg("spa_load_verify: block pointer failed "
+		    "verification at <%llu, %llu, %lld, %llu>, counted as "
+		    "metadata", (u_longlong_t)zb->zb_objset,
+		    (u_longlong_t)zb->zb_object, (longlong_t)zb->zb_level,
+		    (u_longlong_t)zb->zb_blkid);
 		atomic_inc_64(&sle->sle_meta_count);
 		return (0);
 	}
@@ -3166,6 +3181,12 @@ spa_load_verify(spa_t *spa)
 		sle.sle_maxmeta = policy.zlp_maxmeta;
 		sle.sle_maxdata = policy.zlp_maxdata;
 	}
+
+	zfs_dbgmsg("spa_load_verify: txg %llu relaxmeta=%d maxmeta=%llu "
+	    "maxdata=%llu verify_data=%d",
+	    (u_longlong_t)spa->spa_uberblock.ub_txg, (int)sle.sle_relaxmeta,
+	    (u_longlong_t)sle.sle_maxmeta, (u_longlong_t)sle.sle_maxdata,
+	    (int)sle.sle_verify_data);
 
 	rio = zio_root(spa, NULL, &sle,
 	    ZIO_FLAG_CANFAIL | ZIO_FLAG_SPECULATIVE);
