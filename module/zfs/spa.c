@@ -3000,6 +3000,26 @@ typedef struct spa_load_error {
 	uint64_t	sle_data_count;
 } spa_load_error_t;
 
+/*
+ * DEBUG ONLY: the DVAs of a block pointer as "vdev:offset:asize" triples,
+ * so that a failed read can be compared with the offsets a test damaged.
+ */
+static void
+spa_load_verify_dvas(const blkptr_t *bp, char *buf, size_t len)
+{
+	size_t off = 0;
+
+	buf[0] = '\0';
+	for (int d = 0; d < BP_GET_NDVAS(bp) && off < len; d++) {
+		const dva_t *dva = &bp->blk_dva[d];
+
+		off += snprintf(buf + off, len - off, "%s<%llu:%llx:%llx>",
+		    d == 0 ? "" : " ", (u_longlong_t)DVA_GET_VDEV(dva),
+		    (u_longlong_t)DVA_GET_OFFSET(dva),
+		    (u_longlong_t)DVA_GET_ASIZE(dva));
+	}
+}
+
 static void
 spa_load_verify_done(zio_t *zio)
 {
@@ -3027,15 +3047,18 @@ spa_load_verify_done(zio_t *zio)
 			meta = BP_GET_LEVEL(bp) != 0 ||
 			    DMU_OT_IS_METADATA(type);
 		}
+		char dvas[160];
+		spa_load_verify_dvas(bp, dvas, sizeof (dvas));
 		zfs_dbgmsg("spa_load_verify: error %d on <%llu, %llu, %lld, "
-		    "%llu> type %u level %u birth %llu, counted as %s "
-		    "(relaxmeta=%d)", error,
+		    "%llu> type %u level %u birth %llu psize %llx dva %s, "
+		    "counted as %s (relaxmeta=%d)", error,
 		    (u_longlong_t)zio->io_bookmark.zb_objset,
 		    (u_longlong_t)zio->io_bookmark.zb_object,
 		    (longlong_t)zio->io_bookmark.zb_level,
 		    (u_longlong_t)zio->io_bookmark.zb_blkid,
 		    (uint_t)type, (uint_t)BP_GET_LEVEL(bp),
 		    (u_longlong_t)BP_GET_LOGICAL_BIRTH(bp),
+		    (u_longlong_t)BP_GET_PSIZE(bp), dvas,
 		    meta ? "metadata" : "data", (int)sle->sle_relaxmeta);
 		if (meta)
 			atomic_inc_64(&sle->sle_meta_count);
@@ -3101,6 +3124,18 @@ spa_load_verify_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 	if (zb->zb_level == ZB_DNODE_LEVEL || BP_IS_HOLE(bp) ||
 	    BP_IS_EMBEDDED(bp) || BP_IS_REDACTED(bp))
 		return (0);
+
+	/* DEBUG ONLY: where each objset's root block is, read or not */
+	if (BP_GET_TYPE(bp) == DMU_OT_OBJSET) {
+		char dvas[160];
+		spa_load_verify_dvas(bp, dvas, sizeof (dvas));
+		zfs_dbgmsg("spa_load_verify: objset <%llu, %llu, %lld, %llu> "
+		    "birth %llu psize %llx dva %s",
+		    (u_longlong_t)zb->zb_objset, (u_longlong_t)zb->zb_object,
+		    (longlong_t)zb->zb_level, (u_longlong_t)zb->zb_blkid,
+		    (u_longlong_t)BP_GET_LOGICAL_BIRTH(bp),
+		    (u_longlong_t)BP_GET_PSIZE(bp), dvas);
+	}
 
 	if (!BP_IS_METADATA(bp) &&
 	    (!spa_load_verify_data || !sle->sle_verify_data))
